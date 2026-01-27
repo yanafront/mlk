@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  ml-service:
+    build: ../../Downloads/Telegram Desktop/mlk
+    container_name: ml-service
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    env_file:
+      - .env
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+
+
+
+volumes:
+  hf-cache:

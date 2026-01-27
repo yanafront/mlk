@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+sentence-transformers>=2.5.1
+torch
+numpy
+pydantic
+psycopg2-binary
+beautifulsoup4
+lxml
+requests
