@@ -11,8 +11,8 @@ from app.confidence import compute_confidence
 from app.models import generic_vacancy_embedding
 
 
+# Ограничение применяется после финального расчёта (rerank + confidence)
 TOP_K = int(os.getenv("TOP_K", 50))
-FINAL_K = 10
 
 
 def parse_pgvector(raw_embedding) -> List[float]:
@@ -67,9 +67,8 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
         FROM messages
         WHERE embedding IS NOT NULL
         ORDER BY distance
-        LIMIT %s
         """,
-        (query_embedding, TOP_K)
+        (query_embedding,)
     )
 
     rows = cur.fetchall()
@@ -124,7 +123,7 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
             "score": final_score
         })
 
-    # ---------- 6. SORT ----------
+    # ---------- 6. SORT И ФИНАЛЬНЫЙ ФИЛЬТР ----------
     results.sort(key=lambda x: x["score"], reverse=True)
 
-    return results
+    return results[:TOP_K]

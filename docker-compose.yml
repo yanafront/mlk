@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   ml-service:
-    build: ../../Downloads/Telegram Desktop/mlk
+    build: .
     container_name: ml-service
     ports:
       - "8000:8000"

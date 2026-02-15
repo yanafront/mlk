@@ -17,6 +17,7 @@ def normalize_vacancy(content: str) -> str:
     clean_text = clean_html(content)
 
     return (
-        "Задача: сопоставить описание вакансии с запросом кандидата.\n"
-        f"Описание вакансии: {clean_text}"
+        f"{clean_text}"
     )
+
+   
