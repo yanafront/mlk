@@ -18,10 +18,11 @@ rows = cur.fetchall()
 for row in rows:
     normalized_data = normalize_vacancy_llm(row["content"])
     text = normalized_data_to_embedding_text(normalized_data) or normalize_vacancy(row["content"])
-    cur.execute(
-        "UPDATE messages SET normalized = %s WHERE id = %s",
-        (psycopg2.extras.Json(normalized_data), row["id"])
-    )
+    if isinstance(normalized_data, dict) and "error" not in normalized_data:
+        cur.execute(
+            "UPDATE messages SET normalized = %s WHERE id = %s",
+            (psycopg2.extras.Json(normalized_data), row["id"])
+        )
     emb = embedding_model.encode(
         text,
         normalize_embeddings=True
