@@ -1,6 +1,6 @@
 """
-Миграция: изменение размерности embedding с 1024 на 384
-(для модели paraphrase-multilingual-MiniLM-L12-v2).
+Миграция: изменение размерности embedding на 1024
+(для модели intfloat/multilingual-e5-large).
 
 Запуск: python -m app.migrate_embedding_dim
 """
@@ -13,12 +13,12 @@ cur = conn.cursor()
 # USING NULL — все старые значения станут NULL (они несовместимы с новой размерностью)
 cur.execute("""
     ALTER TABLE messages
-    ALTER COLUMN embedding TYPE vector(384) USING NULL
+    ALTER COLUMN embedding TYPE vector(1024) USING NULL
 """)
 
 conn.commit()
 cur.close()
 conn.close()
 
-print("Миграция выполнена: embedding изменён на vector(384).")
+print("Миграция выполнена: embedding изменён на vector(1024).")
 print("Запустите embed_vacancies для пересчёта эмбеддингов.")

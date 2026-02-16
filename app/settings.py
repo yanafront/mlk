@@ -1,3 +1,3 @@
 DEVICE = "cuda"
-EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-RERANKER_MODEL = "BAAI/bge-reranker-large"
+EMBEDDING_MODEL = "intfloat/multilingual-e5-large"
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"

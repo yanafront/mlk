@@ -1,6 +1,7 @@
 from app.models import embedding_model
 from app.db import get_conn
 from app.text_normalizer import normalize_vacancy
+from app.vacancy_normalizer import normalize_vacancy_llm, normalized_data_to_embedding_text
 import psycopg2.extras
 
 conn = get_conn()
@@ -15,7 +16,12 @@ cur.execute("""
 rows = cur.fetchall()
 
 for row in rows:
-    text = normalize_vacancy(row["content"])
+    normalized_data = normalize_vacancy_llm(row["content"])
+    text = normalized_data_to_embedding_text(normalized_data) or normalize_vacancy(row["content"])
+    cur.execute(
+        "UPDATE messages SET normalized = %s WHERE id = %s",
+        (psycopg2.extras.Json(normalized_data), row["id"])
+    )
     emb = embedding_model.encode(
         text,
         normalize_embeddings=True
@@ -26,6 +32,8 @@ for row in rows:
         (emb, row["id"])
     )
 
-conn.commit()
+    conn.commit()
+    print(f"Processed {row['id']}")
+    
 cur.close()
 conn.close()

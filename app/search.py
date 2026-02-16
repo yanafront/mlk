@@ -1,6 +1,7 @@
 from typing import List, Dict, Any
 
 import os
+import time
 import psycopg2.extras
 import json
 
@@ -42,18 +43,24 @@ def is_valid_vacancy(text: str) -> bool:
 
 
 def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
+    t_start = time.perf_counter()
+    metrics = {}
+
     # ---------- 1. EMBEDDING ЗАПРОСА ----------
+    t0 = time.perf_counter()
     query_text = (
         "Задача: найти подходящую вакансию по запросу кандидата.\n"
         f"Запрос пользователя: {user_query}"
     )
 
     query_embedding = embedding_model.encode(
-        query_text,
+        user_query,
         normalize_embeddings=True
     ).tolist()
+    metrics["embedding_ms"] = (time.perf_counter() - t0) * 1000
 
     # ---------- 2. VECTOR SEARCH В POSTGRES ----------
+    t0 = time.perf_counter()
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -67,6 +74,7 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
         FROM messages
         WHERE embedding IS NOT NULL
         ORDER BY distance
+        LIMIT 1000;
         """,
         (query_embedding,)
     )
@@ -74,20 +82,28 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
     rows = cur.fetchall()
     cur.close()
     conn.close()
+    metrics["vector_search_ms"] = (time.perf_counter() - t0) * 1000
 
     if not rows:
+        metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
+        print("search_vacancies metrics:", metrics)
         return []
 
     # ---------- 3. ФИЛЬТР МУСОРА ----------
+    t0 = time.perf_counter()
     rows = [
         r for r in rows
         if is_valid_vacancy(r["content"])
     ]
+    metrics["filter_ms"] = (time.perf_counter() - t0) * 1000
 
     if not rows:
+        metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
+        print("search_vacancies metrics:", metrics)
         return []
 
     # ---------- 4. RERANK ----------
+    t0 = time.perf_counter()
     documents = [
         normalize_vacancy(r["content"])
         for r in rows
@@ -95,15 +111,17 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
 
     pairs = [
         (
-            f"Запрос пользователя: {user_query}",
-            doc
-        )
+        f"query: {user_query}",
+        f"passage: {doc}"
+    )
         for doc in documents
     ]
 
     rerank_scores = reranker_model.predict(pairs)
+    metrics["rerank_ms"] = (time.perf_counter() - t0) * 1000
 
     # ---------- 5. FINAL SCORE = semantic × confidence ----------
+    t0 = time.perf_counter()
     results = []
 
     for row, semantic_score in zip(rows, rerank_scores):
@@ -122,8 +140,17 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
             "content": row["content"],
             "score": final_score
         })
+    metrics["confidence_ms"] = (time.perf_counter() - t0) * 1000
 
     # ---------- 6. SORT И ФИНАЛЬНЫЙ ФИЛЬТР ----------
+    t0 = time.perf_counter()
     results.sort(key=lambda x: x["score"], reverse=True)
+    results = results[:TOP_K]
+    metrics["sort_ms"] = (time.perf_counter() - t0) * 1000
 
-    return results[:TOP_K]
+    metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
+    metrics["candidates_count"] = len(rows)
+    metrics["results_count"] = len(results)
+    print("search_vacancies metrics:", metrics)
+
+    return results
