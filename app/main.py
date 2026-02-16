@@ -20,6 +20,8 @@ def score_to_percent(score: float) -> int:
     return int(100 / (1 + math.exp(-score)))
 
 def normalize_scores_to_percent(scores):
+    if not scores:
+        return []
     min_s = min(scores)
     max_s = max(scores)
 
@@ -51,7 +53,8 @@ def process_query(content: str):
 
 @app.post("/embed")
 def embed(req: EmbedRequest):
-    text = f"Поиск вакансий: {req.text}"
+    # E5: префикс "query: " для запросов
+    text = f"query: {req.text}"
     embedding = embedding_model.encode(
         text,
         normalize_embeddings=True

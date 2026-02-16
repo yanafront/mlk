@@ -54,8 +54,9 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
         f"Запрос пользователя: {user_query}"
     )
 
+    # E5 требует префикс "query: " для запросов (иначе качество сильно падает)
     query_embedding = embedding_model.encode(
-        user_query,
+        f"query: {user_query}",
         normalize_embeddings=True
     ).tolist()
     metrics["embedding_ms"] = (time.perf_counter() - t0) * 1000
@@ -76,7 +77,7 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
         FROM messages
         WHERE embedding IS NOT NULL
         ORDER BY distance
-        LIMIT 1000;
+        LIMIT 100;
         """,
         (query_embedding,)
     )
@@ -134,11 +135,12 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
 
         final_score = float(semantic_score) * confidence
 
-        results.append({
-            "id": row["id"],
-            "content": row["content"],
-            "score": final_score
-        })
+        if final_score >= 0.3:
+            results.append({
+                "id": row["id"],
+                "content": row["content"],
+                "score": final_score
+            })
     metrics["confidence_ms"] = (time.perf_counter() - t0) * 1000
 
     # ---------- 6. SORT И ФИНАЛЬНЫЙ ФИЛЬТР ----------
@@ -161,8 +163,9 @@ def search_vacancies_without_rerank(user_query: str) -> List[Dict[str, Any]]:
 
     # ---------- 1. EMBEDDING ЗАПРОСА ----------
     t0 = time.perf_counter()
+    # E5 требует префикс "query: " для запросов (иначе качество сильно падает)
     query_embedding = embedding_model.encode(
-        user_query,
+        f"query: {user_query}",
         normalize_embeddings=True
     ).tolist()
     metrics["embedding_ms"] = (time.perf_counter() - t0) * 1000
@@ -227,11 +230,12 @@ def search_vacancies_without_rerank(user_query: str) -> List[Dict[str, Any]]:
 
         final_score = float(semantic_score) * confidence
 
-        results.append({
-            "id": row["id"],
-            "content": row["content"],
-            "score": final_score
-        })
+        if final_score >= 0.5:
+            results.append({
+                "id": row["id"],
+                "content": row["content"],
+                "score": final_score
+            })
     metrics["confidence_ms"] = (time.perf_counter() - t0) * 1000
 
     # ---------- 6. SORT И ФИНАЛЬНЫЙ ФИЛЬТР ----------
