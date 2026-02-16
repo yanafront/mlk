@@ -1,11 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import math
-from app.search import search_vacancies, search_vacancies_without_rerank
+from app.search import search_vacancies, search_vacancies_without_rerank, search_users_by_vacancy
 from app.db import get_conn
 from app.models import embedding_model, reranker_model
 from app.schemas import (
     EmbedRequest,
+    VacancyMatchRequest,
+    AddUserRequest,
 )
 
 app = FastAPI(title="Job Semantic Search ML Service")
@@ -89,9 +91,76 @@ def search(req: SearchRequest):
 
 
 
+@app.post("/users")
+def add_user(req: AddUserRequest):
+    """
+    Добавляет или обновляет пользователя (кандидата) с профилем/резюме.
+    Если user_id уже есть — обновляем description и embedding, иначе создаём.
+    """
+    if not req.description or len(req.description.strip()) < 10:
+        raise HTTPException(status_code=400, detail="content слишком короткий (минимум 10 символов)")
+
+    embedding = embedding_model.encode(
+        f"passage: {req.description.strip()}",
+        normalize_embeddings=True
+    ).tolist()
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id FROM main WHERE user_id = %s::bigint LIMIT 1",
+        (req.user_id,)
+    )
+    row = cur.fetchone()
+    if row:
+        cur.execute(
+            "UPDATE main SET description = %s, embedding = %s WHERE user_id = %s::bigint",
+            (req.description.strip(), embedding, req.user_id)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"id": row[0], "status": "updated"}
+    else:
+        cur.execute(
+            "INSERT INTO main (user_id, description, embedding) VALUES (%s::bigint, %s, %s) RETURNING id",
+            (req.user_id, req.description.strip(), embedding)
+        )
+        user_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"id": user_id, "status": "created"}
+
+
+@app.post("/vacancy/match_users")
+def match_users_by_vacancy(req: VacancyMatchRequest):
+    """
+    Принимает текст вакансии и возвращает подходящих пользователей (кандидатов).
+    """
+    top_n = max(1, min(req.top_n, 50))
+    results = search_users_by_vacancy(req.vacancy_text, top_k=top_n)
+
+    scores = [r["score"] for r in results]
+    percents = normalize_scores_to_percent(scores) if scores else []
+
+    response = []
+    for r, p in zip(results, percents):
+        response.append({
+            "user_id": r["id"],
+            "profile": r["description"],
+            "relevance_percent": p
+        })
+
+    return {
+        "vacancy_text": req.vacancy_text[:200] + ("..." if len(req.vacancy_text) > 200 else ""),
+        "results": response
+    }
+
+
 @app.post("/search_without_rerank")
-def search(req: SearchRequest):
-    top_n = max(1, min(req.top_n, 20))  # защита: 1..20
+def search_without_rerank(req: SearchRequest):
+    top_n = max(1, min(req.top_n, 20))  # защита: 1..20 
 
     results = search_vacancies_without_rerank(req.text)
 

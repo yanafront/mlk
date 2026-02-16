@@ -8,7 +8,7 @@ import json
 from app.models import embedding_model, reranker_model
 from app.db import get_conn
 from app.text_normalizer import normalize_vacancy
-from app.vacancy_normalizer import normalized_data_to_embedding_text
+from app.vacancy_normalizer import normalize_vacancy_llm, normalized_data_to_embedding_text
 from app.confidence import compute_confidence
 from app.models import generic_vacancy_embedding
 
@@ -248,5 +248,88 @@ def search_vacancies_without_rerank(user_query: str) -> List[Dict[str, Any]]:
     metrics["candidates_count"] = len(rows)
     metrics["results_count"] = len(results)
     print("search_vacancies_without_rerank metrics:", metrics)
+
+    return results
+
+
+def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str, Any]]:
+    """
+    По вакансии находит подходящих пользователей (кандидатов).
+    Вакансия — запрос, профили пользователей — документы.
+    Вакансия нормализуется так же, как в embed_vacancies.
+    """
+    t_start = time.perf_counter()
+    metrics = {}
+
+    # ---------- 0. НОРМАЛИЗАЦИЯ ВАКАНСИИ (как в embed_vacancies) ----------
+    t0 = time.perf_counter()
+    normalized_data = normalize_vacancy_llm(vacancy_text)
+    query_text = normalized_data_to_embedding_text(normalized_data) or normalize_vacancy(vacancy_text)
+    metrics["normalize_ms"] = (time.perf_counter() - t0) * 1000
+
+    # ---------- 1. EMBEDDING ВАКАНСИИ (как запрос) ----------
+    t0 = time.perf_counter()
+    vacancy_embedding = embedding_model.encode(
+        f"query: {query_text}",
+        normalize_embeddings=True
+    ).tolist()
+    metrics["embedding_ms"] = (time.perf_counter() - t0) * 1000
+
+    # ---------- 2. VECTOR SEARCH В POSTGRES (таблица users) ----------
+    t0 = time.perf_counter()
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute(
+        """
+        SELECT
+            id,
+            description,
+            embedding,
+            embedding <=> %s::vector AS distance
+        FROM main
+        WHERE embedding IS NOT NULL
+        ORDER BY distance
+        LIMIT 100;
+        """,
+        (vacancy_embedding,)
+    )
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    metrics["vector_search_ms"] = (time.perf_counter() - t0) * 1000
+
+    if not rows:
+        metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
+        print("search_users_by_vacancy metrics:", metrics)
+        return []
+
+    # ---------- 3. RERANK: вакансия vs профили пользователей ----------
+    t0 = time.perf_counter()
+    pairs = [
+        (f"query: {query_text}", f"passage: {r['description']}")
+        for r in rows
+    ]
+    rerank_scores = reranker_model.predict(pairs, batch_size=16)
+    metrics["rerank_ms"] = (time.perf_counter() - t0) * 1000
+
+    # ---------- 4. ФОРМИРУЕМ РЕЗУЛЬТАТЫ ----------
+    results = []
+    for row, score in zip(rows, rerank_scores):
+        if float(score) >= 0.3:
+            results.append({
+                "id": row["id"],
+                "description": row["description"],
+                "score": float(score)
+            })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    results = results[:top_k]
+
+    metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
+    metrics["candidates_count"] = len(rows)
+    metrics["results_count"] = len(results)
+    print("search_users_by_vacancy metrics:", metrics)
 
     return results
