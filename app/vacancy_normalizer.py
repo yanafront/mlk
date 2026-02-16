@@ -47,6 +47,10 @@ PROMPT_TEMPLATE = """
 - occupation = категория профессии (IT, Продажи, Логистика, Физический труд и т.д.)
 - Если данных нет → ""
 - skills = список технологий или навыков
+- salary = зарплата
+- employment_type = тип занятости (полный день, неполный день, удаленная работа, гибрид)
+- contact_info = контактная информация (email, телефон, skype, telegram)
+- location = местоположение (город, страна)
 - Верни только JSON без текста
 
 Текст вакансии:
@@ -95,8 +99,13 @@ def normalize_vacancy_llm(vacancy_text: str) -> dict:
     return data
 
 
-def normalized_data_to_embedding_text(data: dict) -> str:
+def normalized_data_to_embedding_text(data) -> str:
     """Формирует текст для embedding из нормализованных данных."""
+    if not isinstance(data, dict):
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+            data = data[0]
+        else:
+            return ""
     if "error" in data:
         return ""
     skills = data.get("skills") or []

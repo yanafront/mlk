@@ -8,6 +8,7 @@ import json
 from app.models import embedding_model, reranker_model
 from app.db import get_conn
 from app.text_normalizer import normalize_vacancy
+from app.vacancy_normalizer import normalized_data_to_embedding_text
 from app.confidence import compute_confidence
 from app.models import generic_vacancy_embedding
 
@@ -69,6 +70,7 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
         SELECT
             id,
             content,
+            normalized,
             embedding,
             embedding <=> %s::vector AS distance
         FROM messages
@@ -105,19 +107,16 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
     # ---------- 4. RERANK ----------
     t0 = time.perf_counter()
     documents = [
-        normalize_vacancy(r["content"])
+        normalized_data_to_embedding_text(r["normalized"]) or normalize_vacancy(r["content"])
         for r in rows
     ]
 
     pairs = [
-        (
-        f"query: {user_query}",
-        f"passage: {doc}"
-    )
+        (f"query: {user_query}", f"passage: {doc}")
         for doc in documents
     ]
 
-    rerank_scores = reranker_model.predict(pairs)
+    rerank_scores = reranker_model.predict(pairs, batch_size=16)
     metrics["rerank_ms"] = (time.perf_counter() - t0) * 1000
 
     # ---------- 5. FINAL SCORE = semantic × confidence ----------
