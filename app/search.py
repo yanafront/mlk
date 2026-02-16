@@ -153,3 +153,96 @@ def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
     print("search_vacancies metrics:", metrics)
 
     return results
+    
+
+def search_vacancies_without_rerank(user_query: str) -> List[Dict[str, Any]]:
+    t_start = time.perf_counter()
+    metrics = {}
+
+    # ---------- 1. EMBEDDING ЗАПРОСА ----------
+    t0 = time.perf_counter()
+    query_embedding = embedding_model.encode(
+        user_query,
+        normalize_embeddings=True
+    ).tolist()
+    metrics["embedding_ms"] = (time.perf_counter() - t0) * 1000
+
+    # ---------- 2. VECTOR SEARCH В POSTGRES ----------
+    t0 = time.perf_counter()
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute(
+        """
+        SELECT
+            id,
+            content,
+            normalized,
+            embedding,
+            embedding <=> %s::vector AS distance
+        FROM messages
+        WHERE embedding IS NOT NULL
+        ORDER BY distance
+        LIMIT 1000;
+        """,
+        (query_embedding,)
+    )
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    metrics["vector_search_ms"] = (time.perf_counter() - t0) * 1000
+
+    if not rows:
+        metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
+        print("search_vacancies_without_rerank metrics:", metrics)
+        return []
+
+    # ---------- 3. ФИЛЬТР МУСОРА ----------
+    t0 = time.perf_counter()
+    rows = [
+        r for r in rows
+        if is_valid_vacancy(r["content"])
+    ]
+    metrics["filter_ms"] = (time.perf_counter() - t0) * 1000
+
+    if not rows:
+        metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
+        print("search_vacancies_without_rerank metrics:", metrics)
+        return []
+
+    # ---------- 4. FINAL SCORE = (1 - distance) × confidence ----------
+    t0 = time.perf_counter()
+    results = []
+
+    for row in rows:
+        semantic_score = max(0.0, 1.0 - float(row["distance"]))
+        vacancy_embedding = parse_pgvector(row["embedding"])
+
+        confidence = compute_confidence(
+            text=row["content"],
+            vacancy_embedding=vacancy_embedding,
+            generic_embedding=generic_vacancy_embedding
+        )
+
+        final_score = float(semantic_score) * confidence
+
+        results.append({
+            "id": row["id"],
+            "content": row["content"],
+            "score": final_score
+        })
+    metrics["confidence_ms"] = (time.perf_counter() - t0) * 1000
+
+    # ---------- 6. SORT И ФИНАЛЬНЫЙ ФИЛЬТР ----------
+    t0 = time.perf_counter()
+    results.sort(key=lambda x: x["score"], reverse=True)
+    results = results[:TOP_K]
+    metrics["sort_ms"] = (time.perf_counter() - t0) * 1000
+
+    metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
+    metrics["candidates_count"] = len(rows)
+    metrics["results_count"] = len(results)
+    print("search_vacancies_without_rerank metrics:", metrics)
+
+    return results

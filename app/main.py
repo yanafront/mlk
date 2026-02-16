@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 import math
-from app.search import search_vacancies
+from app.search import search_vacancies, search_vacancies_without_rerank
 from app.db import get_conn
 from app.models import embedding_model, reranker_model
 from app.schemas import (
@@ -83,3 +83,30 @@ def search(req: SearchRequest):
         "query": req.text,
         "results": response
     }
+
+
+
+@app.post("/search_without_rerank")
+def search(req: SearchRequest):
+    top_n = max(1, min(req.top_n, 20))  # защита: 1..20
+
+    results = search_vacancies_without_rerank(req.text)
+
+    top_results = results[:top_n]
+
+    scores = [r["score"] for r in top_results]
+    percents = normalize_scores_to_percent(scores)
+
+   
+    response = []
+    for r, p in zip(top_results[:5], percents):
+        response.append({
+            "vacancy_id": r["id"],
+            "text": r["content"],
+            "relevance_percent": p
+        })
+
+    return {
+        "query": req.text,
+        "results": response
+    }    
