@@ -1,25 +1,18 @@
-FROM nvidia/cuda:13.1.0-runtime-ubuntu22.04
+FROM python:3.10-slim
 
-ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+WORKDIR /app
+
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
+    build-essential \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-
-
-WORKDIR /app
-
-RUN pip install --upgrade pip setuptools wheel
-
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu130
-
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install -r requirements.txt
 
 COPY app ./app
 

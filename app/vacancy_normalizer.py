@@ -6,27 +6,42 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 MODEL_NAME = "Qwen/Qwen2.5-3B-Instruct"   # можно заменить на 3B
 
 # ---------- LOAD MODEL ----------
-tokenizer = AutoTokenizer.from_pretrained(
-    MODEL_NAME,
-    trust_remote_code=True
-)
+tokenizer = None
+model = None
+generator = None
 
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    torch_dtype="auto",
-    device_map="auto",
-    trust_remote_code=True
-)
+def get_generator():
+    global tokenizer, model, generator
 
-generator = pipeline(
-    "text-generation",
-    model=model,
-    tokenizer=tokenizer,
-    max_new_tokens=512,
-    temperature=0.1,
-    do_sample=False,
-    return_full_text=False,  # только сгенерированный текст, без промпта
-)
+    if generator is None:
+        print("Loading LLM...")
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            MODEL_NAME,
+            trust_remote_code=True
+        )
+
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME,
+            torch_dtype="auto",
+            device_map="auto",
+            trust_remote_code=True
+        )
+
+        generator = pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            max_new_tokens=512,
+            temperature=0.1,
+            do_sample=False,
+            return_full_text=False,
+        )
+
+        print("LLM loaded.")
+
+    return generator
+
 
 # ---------- PROMPT TEMPLATE ----------
 PROMPT_TEMPLATE = """
@@ -63,6 +78,7 @@ PROMPT_TEMPLATE = """
 
 # ---------- NORMALIZATION FUNCTION ----------
 def normalize_vacancy_llm(vacancy_text: str) -> dict:
+    generator = get_generator()
     prompt = PROMPT_TEMPLATE.format(
         vacancy_text=vacancy_text.strip()
     )

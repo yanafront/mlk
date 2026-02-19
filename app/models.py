@@ -24,8 +24,15 @@ GENERIC_VACANCY_TEXT = (
     "требований, профессии и условий работы."
 )
 
-generic_vacancy_embedding = embedding_model.encode(
-    GENERIC_VACANCY_TEXT,
-    normalize_embeddings=True
-).tolist()
+generic_vacancy_embedding = None
+
+def get_generic_vacancy_embedding():
+    global generic_vacancy_embedding
+    if generic_vacancy_embedding is None:
+        generic_vacancy_embedding = embedding_model.encode(
+            GENERIC_VACANCY_TEXT,
+            normalize_embeddings=True
+        ).tolist()
+    return generic_vacancy_embedding
+
 
