@@ -1,7 +1,3 @@
-from dotenv import load_dotenv
-load_dotenv()
-
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import math
@@ -13,9 +9,7 @@ from app.schemas import (
     VacancyMatchRequest,
     AddUserRequest,
     SearchRequest,
-    SearchFilters,
 )
-
 
 app = FastAPI(title="Job Semantic Search ML Service") 
 
@@ -69,17 +63,8 @@ def embed(req: EmbedRequest):
 def search(req: SearchRequest):
     top_n = max(1, min(req.top_n, 20))  # защита: 1..20
 
-    # Извлекаем фильтры из запроса
-    filters = req.filters if req.filters else None
-    location_filter = filters.location if filters else None
-    employment_type_filter = filters.employment_type if filters else None
-    occupation_filter = filters.occupation if filters else None
-
     results = search_vacancies(
         req.text,
-        location_filter=location_filter,
-        employment_type_filter=employment_type_filter,
-        occupation_filter=occupation_filter
     )
 
     top_results = results[:top_n]
@@ -127,7 +112,7 @@ def add_user(req: AddUserRequest):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "SELECT id FROM users WHERE user_id = %s::bigint LIMIT 1",
+        "SELECT id FROM main WHERE user_id = %s::bigint LIMIT 1",
         (req.user_id,)
     )
     row = cur.fetchone()
@@ -181,17 +166,8 @@ def match_users_by_vacancy(req: VacancyMatchRequest):
 def search_without_rerank(req: SearchRequest):
     top_n = max(1, min(req.top_n, 20))  # защита: 1..20
 
-    # Извлекаем фильтры из запроса
-    filters = req.filters if req.filters else None
-    location_filter = filters.location if filters else None
-    employment_type_filter = filters.employment_type if filters else None
-    occupation_filter = filters.occupation if filters else None
-
     results = search_vacancies_without_rerank(
         req.text,
-        location_filter=location_filter,
-        employment_type_filter=employment_type_filter,
-        occupation_filter=occupation_filter
     )
 
     top_results = results[:top_n]

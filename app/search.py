@@ -11,6 +11,7 @@ from app.text_normalizer import normalize_vacancy
 from app.vacancy_normalizer import normalize_vacancy_llm, normalized_data_to_embedding_text
 from app.confidence import compute_confidence, get_generic_vacancy_embedding
 
+
 # Ограничение применяется после финального расчёта (rerank + confidence)
 TOP_K = int(os.getenv("TOP_K", 50))
 
@@ -43,9 +44,6 @@ def is_valid_vacancy(text: str) -> bool:
 
 def search_vacancies(
     user_query: str,
-    location_filter: str = None,
-    employment_type_filter: str = None,
-    occupation_filter: str = None
 ) -> List[Dict[str, Any]]:
     import os
     VECTOR_K = int(os.getenv("VECTOR_K", 200))
@@ -69,28 +67,13 @@ def search_vacancies(
     ).tolist()
     metrics["embedding_ms"] = (time.perf_counter() - t0) * 1000
 
-    # ---------- 2. VECTOR SEARCH В POSTGRES С SQL-ФИЛЬТРАМИ ----------
-    # SQL-фильтры применяются ДО rerank, что уменьшает нагрузку на CrossEncoder
-    # и улучшает latency, так как отсекаются неподходящие кандидаты на уровне БД
+    # ---------- 2. VECTOR SEARCH В POSTGRES ----------
     t0 = time.perf_counter()
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    # Собираем SQL-фильтры по normalized полям (location, employment_type, occupation)
     where_conditions = ["embedding IS NOT NULL"]
     query_params = [query_embedding]
-
-    if location_filter:
-        where_conditions.append("normalized IS NOT NULL AND normalized->>'location' ILIKE %s")
-        query_params.append(f"%{location_filter}%")
-
-    if employment_type_filter:
-        where_conditions.append("normalized IS NOT NULL AND normalized->>'employment_type' ILIKE %s")
-        query_params.append(f"%{employment_type_filter}%")
-
-    if occupation_filter:
-        where_conditions.append("normalized IS NOT NULL AND normalized->>'occupation' ILIKE %s")
-        query_params.append(f"%{occupation_filter}%")
 
     where_clause = " AND ".join(where_conditions)
     query_params.append(VECTOR_K)
@@ -229,9 +212,6 @@ def search_vacancies(
 
 def search_vacancies_without_rerank(
     user_query: str,
-    location_filter: str = None,
-    employment_type_filter: str = None,
-    occupation_filter: str = None
 ) -> List[Dict[str, Any]]:
     import os
     VECTOR_K = int(os.getenv("VECTOR_K", 200))
@@ -248,26 +228,13 @@ def search_vacancies_without_rerank(
     ).tolist()
     metrics["embedding_ms"] = (time.perf_counter() - t0) * 1000
 
-    # ---------- 2. VECTOR SEARCH В POSTGRES С SQL-ФИЛЬТРАМИ ----------
+    # ---------- 2. VECTOR SEARCH В POSTGRES ----------
     t0 = time.perf_counter()
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    # Собираем SQL-фильтры по normalized полям
     where_conditions = ["embedding IS NOT NULL"]
     query_params = [query_embedding]
-
-    if location_filter:
-        where_conditions.append("normalized IS NOT NULL AND normalized->>'location' ILIKE %s")
-        query_params.append(f"%{location_filter}%")
-
-    if employment_type_filter:
-        where_conditions.append("normalized IS NOT NULL AND normalized->>'employment_type' ILIKE %s")
-        query_params.append(f"%{employment_type_filter}%")
-
-    if occupation_filter:
-        where_conditions.append("normalized IS NOT NULL AND normalized->>'occupation' ILIKE %s")
-        query_params.append(f"%{occupation_filter}%")
 
     where_clause = " AND ".join(where_conditions)
     query_params.append(VECTOR_K)
