@@ -46,7 +46,13 @@ cp example.env .env
 | `POSTGRES_DB` | Имя базы данных |
 | `POSTGRES_USER` | Пользователь |
 | `POSTGRES_PASSWORD` | Пароль |
-| `TOP_K` | Максимум результатов в поиске (по умолчанию 50) |
+| `TOP_K` | Максимум результатов в поиске без rerank (по умолчанию 50) |
+| `VECTOR_K` | Количество кандидатов из vector search перед pruning (по умолчанию 200) |
+| `RERANK_K` | Количество кандидатов для CrossEncoder rerank (pre-top-K, по умолчанию 20) |
+| `FINAL_K` | Финальное количество результатов после rerank + confidence (по умолчанию 5) |
+| `USE_LLM_NORMALIZE` | Использовать ли LLM-нормализацию вакансий в `search_users_by_vacancy` (по умолчанию `true`) |
+| `SCORE_THRESHOLD` | Минимальный порог релевантности (0 = отключен, по умолчанию 0)
+| `DIAGNOSE` | Режим отладки (1 - включен, 0 - выключен, по умолчанию 0) |
 
 ### 3. Запуск
 
@@ -132,3 +138,13 @@ mlk/
 - **Reranker:** `BAAI/bge-reranker-v2-m3` — cross-encoder для переранжирования
 
 Модели загружаются при первом запуске и кэшируются в `~/.cache/huggingface`.
+
+## Архитектура поиска
+
+Система использует двухступенчатый нейросетевой поиск:
+
+1. **Vector search** (pgvector + bi-encoder embeddings) — fast semantic retrieval
+
+2. **CrossEncoder reranking/Ранжирование** — precise relevance ranking
+
+Улучшает **recall/полноту** (vector search) и **precision/точность** (reranking).

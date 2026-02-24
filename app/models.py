@@ -2,7 +2,6 @@ import torch
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from app.settings import DEVICE, EMBEDDING_MODEL, RERANKER_MODEL
 
-
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print("Loading embedding model...")
 embedding_model = SentenceTransformer(
@@ -16,23 +15,5 @@ reranker_model = CrossEncoder(
     device=DEVICE
 )
 
-
 print("Models loaded.")
-
-GENERIC_VACANCY_TEXT = (
-    "Описание вакансии без указания обязанностей, "
-    "требований, профессии и условий работы."
-)
-
-generic_vacancy_embedding = None
-
-def get_generic_vacancy_embedding():
-    global generic_vacancy_embedding
-    if generic_vacancy_embedding is None:
-        generic_vacancy_embedding = embedding_model.encode(
-            GENERIC_VACANCY_TEXT,
-            normalize_embeddings=True
-        ).tolist()
-    return generic_vacancy_embedding
-
 
