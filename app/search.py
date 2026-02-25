@@ -267,19 +267,40 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
     query_text = normalized_data_to_embedding_text(normalized_data) or normalize_vacancy(vacancy_text)
     metrics["normalize_ms"] = (time.perf_counter() - t0) * 1000
 
-    # ---------- 1. EMBEDDING ВАКАНСИИ (как запрос) ----------
+    # ---------- 1. EMBEDDING ВАКАНСИИ (query для поиска, passage для хранения) ----------
     t0 = time.perf_counter()
     vacancy_embedding = embedding_model.encode(
         f"query: {query_text}",
         normalize_embeddings=True
     ).tolist()
+    passage_embedding = embedding_model.encode(
+        f"passage: {query_text}",
+        normalize_embeddings=True
+    ).tolist()
     metrics["embedding_ms"] = (time.perf_counter() - t0) * 1000
 
-    # ---------- 2. VECTOR SEARCH В POSTGRES (таблица users) ----------
-    t0 = time.perf_counter()
+    # ---------- 2. СОХРАНЕНИЕ ВАКАНСИИ В БАЗУ ----------
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+    cur.execute(
+        """
+        INSERT INTO messages (content, normalized, embedding)
+        VALUES (%s, %s, %s)
+        RETURNING id;
+        """,
+        (
+            vacancy_text,
+            psycopg2.extras.Json(normalized_data) if isinstance(normalized_data, dict) and "error" not in normalized_data else None,
+            passage_embedding,
+        ),
+    )
+    saved_vacancy_id = cur.fetchone()["id"]
+    conn.commit()
+    metrics["vacancy_id"] = saved_vacancy_id
+
+    # ---------- 3. VECTOR SEARCH В POSTGRES (таблица users) ----------
+    t0 = time.perf_counter()
     cur.execute(
         """
         SELECT
@@ -305,7 +326,7 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
         print("search_users_by_vacancy metrics:", metrics)
         return []
 
-    # ---------- 3. RERANK: вакансия vs профили пользователей ----------
+    # ---------- 4. RERANK: вакансия vs профили пользователей ----------
     t0 = time.perf_counter()
     pairs = [
         (f"query: {query_text}", f"passage: {r['description']}")
@@ -314,7 +335,7 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
     rerank_scores = reranker_model.predict(pairs, batch_size=16)
     metrics["rerank_ms"] = (time.perf_counter() - t0) * 1000
 
-    # ---------- 4. ФОРМИРУЕМ РЕЗУЛЬТАТЫ ----------
+    # ---------- 5. ФОРМИРУЕМ РЕЗУЛЬТАТЫ ----------
     results = []
     for row, score in zip(rows, rerank_scores):
         print("score:", score)
