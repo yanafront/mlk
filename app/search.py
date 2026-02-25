@@ -283,7 +283,7 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
     cur.execute(
         """
         SELECT
-            id,
+            user_id,
             description,
             embedding,
             embedding <=> %s::vector AS distance
@@ -317,9 +317,10 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
     # ---------- 4. ФОРМИРУЕМ РЕЗУЛЬТАТЫ ----------
     results = []
     for row, score in zip(rows, rerank_scores):
-        if float(score) >= 0.3:
+        print("score:", score)
+        if float(score) >= 0.01:
             results.append({
-                "id": row["id"],
+                "user_id": row["user_id"],
                 "description": row["description"],
                 "score": float(score)
             })
