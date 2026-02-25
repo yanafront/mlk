@@ -3,7 +3,7 @@ import re
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
-MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"   # можно заменить на 3B
+MODEL_NAME = "Qwen/Qwen2.5-3B-Instruct"   # можно заменить на 3B
 
 # ---------- LOAD MODEL ----------
 tokenizer = AutoTokenizer.from_pretrained(
