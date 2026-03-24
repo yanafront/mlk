@@ -151,9 +151,9 @@ def match_users_by_vacancy(req: VacancyMatchRequest):
     response = []
     for r, p in zip(results, percents):
         response.append({
-            "user_id": r["id"],
-            "profile": r["description"],
-            "relevance_percent": p
+            "user_id": r["user_id"],
+            "description": r["description"],
+
         })
 
     return {

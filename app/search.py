@@ -333,8 +333,10 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
     t_start = time.perf_counter()
     metrics = {}
 
-    # ---------- 0. НОРМАЛИЗАЦИЯ ВАКАНСИИ ----------
+        # ---------- 0. НОРМАЛИЗАЦИЯ ВАКАНСИИ ----------
     t0 = time.perf_counter()
+    USE_LLM_NORMALIZE = os.getenv("USE_LLM_NORMALIZE", "true").lower() == "true"
+    
     if USE_LLM_NORMALIZE:
         normalized_data = normalize_vacancy_llm(vacancy_text)
         query_text = normalized_data_to_embedding_text(normalized_data) or normalize_vacancy(vacancy_text)
@@ -343,23 +345,44 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
         normalized_data = None
     metrics["normalize_ms"] = (time.perf_counter() - t0) * 1000
 
-    # ---------- 1. EMBEDDING ВАКАНСИИ (как запрос) ----------
+    # ---------- 1. EMBEDDING ВАКАНСИИ ----------
     t0 = time.perf_counter()
     vacancy_embedding = embedding_model.encode(
         f"query: {query_text}",
         normalize_embeddings=True
     ).tolist()
+    passage_embedding = embedding_model.encode(
+        f"passage: {query_text}",
+        normalize_embeddings=True
+    ).tolist()
     metrics["embedding_ms"] = (time.perf_counter() - t0) * 1000
 
-    # ---------- 2. VECTOR SEARCH В POSTGRES (таблица users) ----------
-    t0 = time.perf_counter()
+    # ---------- 2. СОХРАНЕНИЕ ВАКАНСИИ В БАЗУ ----------
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     cur.execute(
         """
+        INSERT INTO messages (content, normalized, embedding)
+        VALUES (%s, %s, %s)
+        RETURNING id;
+        """,
+        (
+            vacancy_text,
+            psycopg2.extras.Json(normalized_data) if isinstance(normalized_data, dict) and "error" not in normalized_data else None,
+            passage_embedding,
+        ),
+    )
+    saved_vacancy_id = cur.fetchone()["id"]
+    conn.commit()
+    metrics["vacancy_id"] = saved_vacancy_id
+
+    # ---------- 3. VECTOR SEARCH В POSTGRES ----------
+    t0 = time.perf_counter()
+    cur.execute(
+        """
         SELECT
-            id,
+            user_id,
             description,
             embedding,
             embedding <=> %s::vector AS distance
@@ -381,11 +404,10 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
         print("search_users_by_vacancy metrics:", metrics)
         return []
 
-    # ---------- 3. PRE-RERANK PRUNING ----------
-    # Оставляем только верхние RERANK_K кандидатов для CrossEncoder
+    # ---------- 4. PRE-RERANK PRUNING ----------
     rows = rows[:RERANK_K]
 
-    # ---------- 4. RERANK: вакансия vs профили пользователей ----------
+    # ---------- 5. RERANK: вакансия vs профили пользователей ----------
     t0 = time.perf_counter()
     pairs = [
         (query_text, r['description'])
@@ -394,18 +416,18 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
     rerank_scores = reranker_model.predict(pairs, batch_size=16)
     metrics["rerank_ms"] = (time.perf_counter() - t0) * 1000
 
-    # ---------- 5. ФОРМИРУЕМ РЕЗУЛЬТАТЫ ----------
+    # ---------- 6. ФОРМИРУЕМ РЕЗУЛЬТАТЫ ----------
     results = []
     for row, score in zip(rows, rerank_scores):
-        if float(score) >= 0.3:
+        print("score:", score)
+        if float(score) >= 0.01:
             results.append({
-                "id": row["id"],
+                "user_id": row["user_id"],
                 "description": row["description"],
                 "score": float(score)
             })
 
     results.sort(key=lambda x: x["score"], reverse=True)
-    # Учитываем и внешний top_k, и внутренний FINAL_K
     results = results[: min(top_k, FINAL_K)]
 
     metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
