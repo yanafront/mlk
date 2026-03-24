@@ -8,7 +8,7 @@ import json
 from app.models import embedding_model, reranker_model
 from app.db import get_conn
 from app.text_normalizer import normalize_vacancy
-from app.vacancy_normalizer import normalize_vacancy_llm, normalized_data_to_embedding_text
+from app.vacancy_normalizer import normalize_vacancy_api, normalized_data_to_embedding_text
 from app.confidence import compute_confidence
 from app.models import generic_vacancy_embedding
 
@@ -263,7 +263,7 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
 
     # ---------- 0. НОРМАЛИЗАЦИЯ ВАКАНСИИ (как в embed_vacancies) ----------
     t0 = time.perf_counter()
-    normalized_data = normalize_vacancy_llm(vacancy_text)
+    normalized_data = normalize_vacancy_api(vacancy_text)
     query_text = normalized_data_to_embedding_text(normalized_data) or normalize_vacancy(vacancy_text)
     metrics["normalize_ms"] = (time.perf_counter() - t0) * 1000
 

@@ -1,82 +1,142 @@
-import json
-import re
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+import os
 
-MODEL_NAME = "Qwen/Qwen2.5-3B-Instruct"   # можно заменить на 3B
+import requests
 
-
-# ---------- LOAD MODEL ----------
-tokenizer = AutoTokenizer.from_pretrained(
-    MODEL_NAME,
-    trust_remote_code=True
+VACANCY_NORMALIZER_API_URL = os.getenv("VACANCY_NORMALIZER_API_URL", "").strip()
+VACANCY_NORMALIZER_API_TIMEOUT_SECONDS = int(
+    os.getenv("VACANCY_NORMALIZER_API_TIMEOUT_SECONDS", "300")
 )
 
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    torch_dtype="auto",
-    device_map="auto",
-    trust_remote_code=True
-)
 
-generator = pipeline(
-    "text-generation",
-    model=model,
-    tokenizer=tokenizer,
-    max_new_tokens=512,
-    temperature=0.1,
-    do_sample=False,
-    return_full_text=False,  # только сгенерированный текст, без промпта
-)
+def normalize_vacancy_api(vacancy_text: str) -> dict:
+    if not VACANCY_NORMALIZER_API_URL:
+        return {"error": "VACANCY_NORMALIZER_API_URL is not set"}
 
-# ---------- PROMPT TEMPLATE ----------
-PROMPT_TEMPLATE = """
-Извлеки структурированные данные из вакансии.
-Верни ТОЛЬКО один JSON-объект, без объяснений, без текста до и после.
-Схема:
-{{
-  "job_title": "",
-  "occupation": "",
-  "skills": [],
-  "work_type": "",
-  "seniority": "",
-  "contact_info": "",
-  "location": "",
-  "salary": "",
-  "employment_type": ""
-}}
+    payload = {"vacancy_text": vacancy_text.strip()}
 
-Правила:
-- occupation = категория профессии (IT, Продажи, Логистика, Физический труд и т.д.)
-- Если данных нет → ""
-- skills = список технологий или навыков
-- salary = зарплата
-- employment_type = тип занятости (полный день, неполный день, удаленная работа, гибрид)
-- contact_info = контактная информация (email, телефон, skype, telegram)
-- location = местоположение (город, страна). Нельзя угадывать страну, если нет в тексте.
-- Ответ: строго один JSON, ничего больше. Не добавляй пояснений, извинений и второго пустого JSON.
+    try:
+        response = requests.post(
+            VACANCY_NORMALIZER_API_URL,
+            json=payload,
+            timeout=VACANCY_NORMALIZER_API_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        return {"error": "vacancy normalizer API request failed", "details": str(exc)}
 
-Текст вакансии:
-\"\"\"
-{vacancy_text}
-\"\"\"
-"""
+    try:
+        data = response.json()
+    except ValueError:
+        return {"error": "invalid JSON in API response", "raw": response.text}
 
-# ---------- NORMALIZATION FUNCTION ----------
-def normalize_vacancy_llm(vacancy_text: str) -> dict:
-    prompt = PROMPT_TEMPLATE.format(
-        vacancy_text=vacancy_text.strip()
+    if not isinstance(data, dict):
+        return {"error": "invalid API response format", "raw": data}
+
+    return data
+
+
+def normalized_data_to_embedding_text(data) -> str:
+    """Формирует текст для embedding из нормализованных данных."""
+    if not isinstance(data, dict):
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+            data = data[0]
+        else:
+            return ""
+    if "error" in data:
+        return ""
+    skills = data.get("skills") or []
+    skills_str = ", ".join(skills) if isinstance(skills, list) else str(skills)
+    return "\n".join(
+        [
+            f"Job title: {data.get('job_title', '')}",
+            f"Occupation: {data.get('occupation', '')}",
+            f"Skills: {skills_str}",
+            f"Work type: {data.get('work_type', '')}",
+            f"Seniority: {data.get('seniority', '')}",
+            f"Contact info: {data.get('contact_info', '')}",
+            f"Location: {data.get('location', '')}",
+            f"Salary: {data.get('salary', '')}",
+            f"Employment type: {data.get('employment_type', '')}",
+        ]
     )
+import os
 
-    result = generator(prompt)[0]["generated_text"]
-    print("LLM response:", result)
+import requests
 
-    # ---------- EXTRACT JSON ----------
-    # 1. Ищем блок ```json ... ``` — модель часто оборачивает ответ в markdown
+VACANCY_NORMALIZER_API_URL = os.getenv("VACANCY_NORMALIZER_API_URL", "").strip()
+VACANCY_NORMALIZER_API_TIMEOUT_SECONDS = 300
+
+
+def normalize_vacancy_llm(vacancy_text: str) -> dict:
+    if not VACANCY_NORMALIZER_API_URL:
+        return {"error": "VACANCY_NORMALIZER_API_URL is not set"}
+
+    payload = {
+        "vacancy_text": vacancy_text.strip(),
+    }
+
+    try:
+        response = requests.post(
+            VACANCY_NORMALIZER_API_URL,
+            json=payload,
+            timeout=VACANCY_NORMALIZER_API_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        return {"error": "vacancy normalizer API request failed", "details": str(exc)}
+
+    try:
+        data = response.json()
+    except ValueError:
+        return {"error": "invalid JSON in API response", "raw": response.text}
+
+    if not isinstance(data, dict):
+        return {"error": "invalid API response format", "raw": data}
+
+    return data
+
+
+def normalized_data_to_embedding_text(data) -> str:
+    """Формирует текст для embedding из нормализованных данных."""
+    if not isinstance(data, dict):
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+            data = data[0]
+        else:
+            return ""
+    if "error" in data:
+        return ""
+    skills = data.get("skills") or []
+    skills_str = ", ".join(skills) if isinstance(skills, list) else str(skills)
+    return "\n".join(
+        [
+            f"Job title: {data.get('job_title', '')}",
+            f"Occupation: {data.get('occupation', '')}",
+            f"Skills: {skills_str}",
+            f"Work type: {data.get('work_type', '')}",
+            f"Seniority: {data.get('seniority', '')}",
+            f"Contact info: {data.get('contact_info', '')}",
+            f"Location: {data.get('location', '')}",
+            f"Salary: {data.get('salary', '')}",
+            f"Employment type: {data.get('employment_type', '')}",
+        ]
+    )
+import json
+import os
+import re
+from typing import Any, Dict
+
+import requests
+
+VACANCY_NORMALIZER_API_URL = os.getenv("VACANCY_NORMALIZER_API_URL", "").strip()
+VACANCY_NORMALIZER_API_TIMEOUT_SECONDS = 300
+
+
+def _extract_json_from_text(result: str) -> Dict[str, Any]:
+    # 1. Ищем блок ```json ... ``` — внешний сервис может вернуть markdown-ответ модели
     json_blocks = re.findall(r"```json\s*(.*?)\s*```", result, re.DOTALL)
     if json_blocks:
-        # Модель иногда сначала даёт валидный JSON, потом извиняется и добавляет пустой {}
-        # Берём непустой блок с данными, а не последний
+        # Иногда сначала приходит валидный JSON, а затем пустой {}
+        # Берем непустой блок с данными, а не последний
         candidates = [b.strip() for b in json_blocks]
         json_str = None
         for c in reversed(candidates):
@@ -89,7 +149,7 @@ def normalize_vacancy_llm(vacancy_text: str) -> dict:
                 pass
         json_str = json_str or candidates[-1]
     else:
-        # 2. Берём последний полный JSON-объект (ответ модели в конце)
+        # 2. Берем последний полный JSON-объект
         last_brace = result.rfind("}")
         if last_brace == -1:
             return {"error": "JSON not found", "raw": result}
@@ -107,7 +167,7 @@ def normalize_vacancy_llm(vacancy_text: str) -> dict:
             return {"error": "JSON not found", "raw": result}
         json_str = result[json_start : last_brace + 1]
 
-    # Удаляем комментарии — JSON их не поддерживает, модель иногда их добавляет
+    # Удаляем комментарии — JSON их не поддерживает
     # Только после запятой (,\s*//) или целые строки-комментарии, чтобы не задеть // внутри строк
     json_str = re.sub(r",\s*//[^\n]*", ",", json_str)
     json_str = re.sub(r"(?m)^\s*//[^\n]*\n?", "", json_str)
@@ -128,7 +188,7 @@ def normalize_vacancy_llm(vacancy_text: str) -> dict:
     if not isinstance(data, dict):
         return {"error": "empty or invalid result", "raw": result}
 
-    # Если получили пустой dict, но в ответе есть JSON с данными (модель могла добавить {} после извинений)
+    # Если получили пустой dict, но в ответе есть JSON с данными
     if not any(v for v in data.values() if v):
         first_brace = result.find("{")
         if first_brace != -1:
@@ -141,13 +201,61 @@ def normalize_vacancy_llm(vacancy_text: str) -> dict:
                     if depth == 0:
                         try:
                             first_data = json.loads(result[json_start : i + 1])
-                            if isinstance(first_data, dict) and any(v for v in first_data.values() if v):
+                            if isinstance(first_data, dict) and any(
+                                v for v in first_data.values() if v
+                            ):
                                 return first_data
                         except json.JSONDecodeError:
                             pass
                         break
 
     return data
+
+
+def normalize_vacancy_llm(vacancy_text: str) -> dict:
+    if not VACANCY_NORMALIZER_API_URL:
+        return {"error": "VACANCY_NORMALIZER_API_URL is not set"}
+
+    payload = {
+        "vacancy_text": vacancy_text.strip(),
+    }
+
+    try:
+        response = requests.post(
+            VACANCY_NORMALIZER_API_URL,
+            json=payload,
+            timeout=VACANCY_NORMALIZER_API_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        return {"error": "vacancy normalizer API request failed", "details": str(exc)}
+
+    try:
+        response_data = response.json()
+    except ValueError:
+        return _extract_json_from_text(response.text)
+
+    if isinstance(response_data, dict):
+        if "normalized" in response_data:
+            normalized = response_data["normalized"]
+            if isinstance(normalized, dict):
+                return normalized
+            if isinstance(normalized, str):
+                return _extract_json_from_text(normalized)
+
+        if "result" in response_data:
+            result = response_data["result"]
+            if isinstance(result, dict):
+                return result
+            if isinstance(result, str):
+                return _extract_json_from_text(result)
+
+        return response_data
+
+    if isinstance(response_data, str):
+        return _extract_json_from_text(response_data)
+
+    return {"error": "unexpected API response format", "raw": response_data}
 
 
 def normalized_data_to_embedding_text(data) -> str:
@@ -161,14 +269,16 @@ def normalized_data_to_embedding_text(data) -> str:
         return ""
     skills = data.get("skills") or []
     skills_str = ", ".join(skills) if isinstance(skills, list) else str(skills)
-    return "\n".join([
-        f"Job title: {data.get('job_title', '')}",
-        f"Occupation: {data.get('occupation', '')}",
-        f"Skills: {skills_str}",
-        f"Work type: {data.get('work_type', '')}",
-        f"Seniority: {data.get('seniority', '')}",
-        f"Contact info: {data.get('contact_info', '')}",
-        f"Location: {data.get('location', '')}",
-        f"Salary: {data.get('salary', '')}",
-        f"Employment type: {data.get('employment_type', '')}",
-    ])
+    return "\n".join(
+        [
+            f"Job title: {data.get('job_title', '')}",
+            f"Occupation: {data.get('occupation', '')}",
+            f"Skills: {skills_str}",
+            f"Work type: {data.get('work_type', '')}",
+            f"Seniority: {data.get('seniority', '')}",
+            f"Contact info: {data.get('contact_info', '')}",
+            f"Location: {data.get('location', '')}",
+            f"Salary: {data.get('salary', '')}",
+            f"Employment type: {data.get('employment_type', '')}",
+        ]
+    )
