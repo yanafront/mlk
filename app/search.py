@@ -379,7 +379,7 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
             description,
             embedding,
             embedding <=> %s::vector AS distance
-        FROM users
+        FROM main
         WHERE embedding IS NOT NULL
         ORDER BY distance
         LIMIT %s;

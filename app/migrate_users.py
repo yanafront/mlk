@@ -11,7 +11,7 @@ conn = get_conn()
 cur = conn.cursor()
 
 cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
+    CREATE TABLE IF NOT EXISTS main (
         id SERIAL PRIMARY KEY,
         content TEXT NOT NULL,
         embedding vector(1024)
