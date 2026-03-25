@@ -19,7 +19,7 @@ where_clause = "" if force_reembed else "WHERE embedding IS NULL"
 
 cur.execute(f"""
     SELECT id, content
-    FROM users
+    FROM main
     {where_clause}
 """)
 
@@ -37,7 +37,7 @@ for row in rows:
     ).tolist()
 
     cur.execute(
-        "UPDATE users SET embedding = %s WHERE id = %s",
+        "UPDATE main SET embedding = %s WHERE id = %s",
         (emb, row["id"])
     )
     conn.commit()
