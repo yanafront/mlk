@@ -4,22 +4,22 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+WORKDIR /app
+
 RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
     python3 \
     python3-pip \
-    git \
     && rm -rf /var/lib/apt/lists/*
 
-
-
-WORKDIR /app
+COPY requirements.txt .
 
 RUN pip install --upgrade pip setuptools wheel
 
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu130
 
-COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install -r requirements.txt
 
 COPY app ./app
 

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 class EmbedRequest(BaseModel):
     text: str
@@ -29,3 +29,8 @@ class AddUserRequest(BaseModel):
     """Добавление пользователя (профиль/резюме)."""
     description: str
     user_id: int
+    
+
+class SearchRequest(BaseModel):
+    text: str
+    top_n: int = 5

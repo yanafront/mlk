@@ -2,7 +2,6 @@ import os
 import psycopg2
 from pgvector.psycopg2 import register_vector
 
-
 def get_conn():
     conn = psycopg2.connect(
         host=os.getenv("POSTGRES_HOST"),

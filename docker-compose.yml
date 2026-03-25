@@ -20,7 +20,5 @@ services:
     volumes:
       - hf-cache:/root/.cache/huggingface
 
-
-
 volumes:
   hf-cache:

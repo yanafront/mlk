@@ -8,14 +8,10 @@ from app.schemas import (
     EmbedRequest,
     VacancyMatchRequest,
     AddUserRequest,
+    SearchRequest,
 )
 
-app = FastAPI(title="Job Semantic Search ML Service")
-
-
-class SearchRequest(BaseModel):
-    text: str
-    top_n: int = 5 
+app = FastAPI(title="Job Semantic Search ML Service") 
 
 
 def score_to_percent(score: float) -> int:
@@ -49,7 +45,7 @@ def process_query(content: str):
     cur.close()
     conn.close()
 
-    # ищем вакансии
+    # ищем вакансии (без фильтров для /query endpoint)
     results = search_vacancies(content)
     return results
 
@@ -63,19 +59,28 @@ def embed(req: EmbedRequest):
     )
     return {"embedding": embedding.tolist()}
 
-
 @app.post("/search")
 def search(req: SearchRequest):
     top_n = max(1, min(req.top_n, 20))  # защита: 1..20
 
-    results = search_vacancies(req.text)
+    results = search_vacancies(
+        req.text,
+    )
 
     top_results = results[:top_n]
 
     scores = [r["score"] for r in top_results]
-    percents = normalize_scores_to_percent(scores)
+    percents = [
+        int(100 * (1 / (1 + math.exp(-5 * s))))
+        for s in scores
+    ]
 
-   
+    warning = None
+    if percents and max(percents) < 30:  # если лучший результат < 30%
+        warning = "По вашему запросу мало точных совпадений. Показываем похожие вакансии."
+    elif not results:  # если результатов вообще нет
+        warning = "Ничего не найдено. Попробуйте изменить запрос."
+
     response = []
     for r, p in zip(top_results[:5], percents):
         response.append({
@@ -86,10 +91,9 @@ def search(req: SearchRequest):
 
     return {
         "query": req.text,
+        "warning": warning,
         "results": response
     }
-
-
 
 @app.post("/users")
 def add_user(req: AddUserRequest):
@@ -160,9 +164,11 @@ def match_users_by_vacancy(req: VacancyMatchRequest):
 
 @app.post("/search_without_rerank")
 def search_without_rerank(req: SearchRequest):
-    top_n = max(1, min(req.top_n, 20))  # защита: 1..20 
+    top_n = max(1, min(req.top_n, 20))  # защита: 1..20
 
-    results = search_vacancies_without_rerank(req.text)
+    results = search_vacancies_without_rerank(
+        req.text,
+    )
 
     top_results = results[:top_n]
 
