@@ -133,6 +133,38 @@ def normalize_vacancy_llm(vacancy_text: str) -> dict:
     return {"error": "unexpected API response format", "raw": response_data}
 
 
+def _vacancy_dict_has_content(data: dict) -> bool:
+    """Есть ли хоть какие-то данные по полям вакансии (не пустой шаблон / не {})."""
+    for key, value in data.items():
+        if key in ("error", "notVacancy"):
+            continue
+        if key == "skills":
+            if isinstance(value, list) and any(str(x).strip() for x in value):
+                return True
+            continue
+        if value not in (None, "", []):
+            return True
+    return False
+
+
+def should_skip_vacancy_after_normalization(data) -> bool:
+    """
+    True — ответ нормализации не годится как вакансия: не dict, ошибка парсинга/API,
+    явный флаг notVacancy от внешнего сервиса, пустой {} или объект без полезных полей.
+    """
+    if not isinstance(data, dict):
+        return True
+    if data.get("notVacancy") is True:
+        return True
+    if "error" in data:
+        return True
+    if not data:
+        return True
+    if not _vacancy_dict_has_content(data):
+        return True
+    return False
+
+
 def normalized_data_to_embedding_text(data) -> str:
     """Формирует текст для embedding из нормализованных данных."""
     if not isinstance(data, dict):

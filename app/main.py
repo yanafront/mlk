@@ -143,7 +143,9 @@ def match_users_by_vacancy(req: VacancyMatchRequest):
     Принимает текст вакансии и возвращает подходящих пользователей (кандидатов).
     """
     top_n = max(1, min(req.top_n, 50))
-    results = search_users_by_vacancy(req.vacancy_text, top_k=top_n)
+    search_out = search_users_by_vacancy(req.vacancy_text, top_k=top_n)
+    results = search_out["results"]
+    not_vacancy = search_out.get("notVacancy", False)
 
     scores = [r["score"] for r in results]
     percents = normalize_scores_to_percent(scores) if scores else []
@@ -158,6 +160,7 @@ def match_users_by_vacancy(req: VacancyMatchRequest):
 
     return {
         "vacancy_text": req.vacancy_text[:200] + ("..." if len(req.vacancy_text) > 200 else ""),
+        "notVacancy": not_vacancy,
         "results": response
     }
 
