@@ -14,6 +14,10 @@ from app.confidence import compute_confidence, get_generic_vacancy_embedding
 
 # Ограничение применяется после финального расчёта (rerank + confidence)
 TOP_K = int(os.getenv("TOP_K", 50))
+VECTOR_K = int(os.getenv("VECTOR_K", 200))
+RERANK_K = int(os.getenv("RERANK_K", 20))
+FINAL_K = int(os.getenv("FINAL_K", 5))  
+USE_LLM_NORMALIZE = os.getenv("USE_LLM_NORMALIZE", "true").lower() == "true"
 
 
 def parse_pgvector(raw_embedding) -> List[float]:
@@ -45,11 +49,8 @@ def is_valid_vacancy(text: str) -> bool:
 def search_vacancies(
     user_query: str,
 ) -> List[Dict[str, Any]]:
-    import os
-    VECTOR_K = int(os.getenv("VECTOR_K", 200))
-    RERANK_K = int(os.getenv("RERANK_K", 20))
-    FINAL_K = int(os.getenv("FINAL_K", 5))
-
+   
+   
     t_start = time.perf_counter()
     metrics = {}
 
@@ -213,9 +214,7 @@ def search_vacancies(
 def search_vacancies_without_rerank(
     user_query: str,
 ) -> List[Dict[str, Any]]:
-    import os
-    VECTOR_K = int(os.getenv("VECTOR_K", 200))
-    RERANK_K = int(os.getenv("RERANK_K", 20))
+
     t_start = time.perf_counter()
     metrics = {}
 
@@ -324,18 +323,12 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
     Вакансия — запрос, профили пользователей — документы.
     Вакансия нормализуется так же, как в embed_vacancies.
     """
-    import os
-    VECTOR_K = int(os.getenv("VECTOR_K", 200))
-    RERANK_K = int(os.getenv("RERANK_K", 20))
-    FINAL_K = int(os.getenv("FINAL_K", 5))
-    USE_LLM_NORMALIZE = os.getenv("USE_LLM_NORMALIZE", "true").lower() == "true"
 
     t_start = time.perf_counter()
     metrics = {}
 
         # ---------- 0. НОРМАЛИЗАЦИЯ ВАКАНСИИ ----------
     t0 = time.perf_counter()
-    USE_LLM_NORMALIZE = os.getenv("USE_LLM_NORMALIZE", "true").lower() == "true"
     
     if USE_LLM_NORMALIZE:
         normalized_data = normalize_vacancy_llm(vacancy_text)
