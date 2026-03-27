@@ -133,6 +133,27 @@ def normalize_vacancy_llm(vacancy_text: str) -> dict:
     return {"error": "unexpected API response format", "raw": response_data}
 
 
+def has_usable_normalized_vacancy_data(data) -> bool:
+    """
+    True, если из ответа нормализации можно строить поиск (есть хотя бы одно непустое поле).
+    Ошибка API, {} или объект только из пустых полей — False.
+    """
+    if not isinstance(data, dict):
+        return False
+    if "error" in data:
+        return False
+    if not data:
+        return False
+    for key, value in data.items():
+        if key == "skills":
+            if isinstance(value, list) and any(str(x).strip() for x in value):
+                return True
+            continue
+        if value not in (None, "", []):
+            return True
+    return False
+
+
 def normalized_data_to_embedding_text(data) -> str:
     """Формирует текст для embedding из нормализованных данных."""
     if not isinstance(data, dict):

@@ -7,8 +7,11 @@ import json
 
 from app.models import embedding_model, reranker_model
 from app.db import get_conn
-from app.text_normalizer import normalize_vacancy
-from app.vacancy_normalizer import normalize_vacancy_llm, normalized_data_to_embedding_text
+from app.vacancy_normalizer import (
+    normalize_vacancy_llm,
+    normalized_data_to_embedding_text,
+    has_usable_normalized_vacancy_data,
+)
 from app.confidence import compute_confidence, get_generic_vacancy_embedding
 
 
@@ -120,7 +123,7 @@ def search_vacancies(
     # ---------- 4. RERANK ----------
     t0 = time.perf_counter()
     documents = [
-        normalized_data_to_embedding_text(r["normalized"]) or normalize_vacancy(r["content"])
+        normalized_data_to_embedding_text(r["normalized"])
         for r in rows
     ]
 
@@ -332,13 +335,15 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
 
     if USE_LLM_NORMALIZE:
         normalized_data = normalize_vacancy_llm(vacancy_text)
-        query_text = normalized_data_to_embedding_text(normalized_data) or normalize_vacancy(
-            vacancy_text
-        )
     else:
-        query_text = normalize_vacancy(vacancy_text)
         normalized_data = None
+    query_text = normalized_data_to_embedding_text(normalized_data)
     metrics["normalize_ms"] = (time.perf_counter() - t0) * 1000
+
+    if USE_LLM_NORMALIZE and not has_usable_normalized_vacancy_data(normalized_data):
+        metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
+        print("search_users_by_vacancy: skip (no normalized data), metrics:", metrics)
+        return []
 
     # ---------- 1. EMBEDDING ВАКАНСИИ ----------
     t0 = time.perf_counter()
