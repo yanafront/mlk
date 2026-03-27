@@ -8,11 +8,7 @@ import json
 from app.models import embedding_model, reranker_model
 from app.db import get_conn
 from app.text_normalizer import normalize_vacancy
-from app.vacancy_normalizer import (
-    normalize_vacancy_llm,
-    normalized_data_to_embedding_text,
-    should_skip_vacancy_after_normalization,
-)
+from app.vacancy_normalizer import normalize_vacancy_llm, normalized_data_to_embedding_text
 from app.confidence import compute_confidence, get_generic_vacancy_embedding
 
 
@@ -321,16 +317,11 @@ def search_vacancies_without_rerank(
     return results
 
 
-def search_users_by_vacancy(
-    vacancy_text: str, top_k: int = 20
-) -> Dict[str, Any]:
+def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str, Any]]:
     """
     По вакансии находит подходящих пользователей (кандидатов).
     Вакансия — запрос, профили пользователей — документы.
     Вакансия нормализуется так же, как в embed_vacancies.
-
-    Если внешняя нормализация не вернула валидный JSON-ответ о вакансии,
-    поиск не выполняется; в ответе notVacancy=True.
     """
 
     t_start = time.perf_counter()
@@ -341,11 +332,6 @@ def search_users_by_vacancy(
 
     if USE_LLM_NORMALIZE:
         normalized_data = normalize_vacancy_llm(vacancy_text)
-        if should_skip_vacancy_after_normalization(normalized_data):
-            metrics["normalize_ms"] = (time.perf_counter() - t0) * 1000
-            metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
-            print("search_users_by_vacancy: skip (notVacancy), metrics:", metrics)
-            return {"results": [], "notVacancy": True}
         query_text = normalized_data_to_embedding_text(normalized_data) or normalize_vacancy(
             vacancy_text
         )
@@ -411,7 +397,7 @@ def search_users_by_vacancy(
     if not rows:
         metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
         print("search_users_by_vacancy metrics:", metrics)
-        return {"results": [], "notVacancy": False}
+        return []
 
     # ---------- 4. PRE-RERANK PRUNING ----------
     rows = rows[:RERANK_K]
@@ -449,4 +435,4 @@ def search_users_by_vacancy(
     )
     print("search_users_by_vacancy metrics:", metrics)
 
-    return {"results": results, "notVacancy": False}
+    return results
