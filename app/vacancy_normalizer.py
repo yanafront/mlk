@@ -135,23 +135,14 @@ def normalize_vacancy_llm(vacancy_text: str) -> dict:
 
 def has_usable_normalized_vacancy_data(data) -> bool:
     """
-    True, если из ответа нормализации можно строить поиск (есть хотя бы одно непустое поле).
-    Ошибка API, {} или объект только из пустых полей — False.
+    True, если ответ нормализации содержит непустой JSON-объект.
+    Ошибка API, {}, None или не-dict — False.
     """
     if not isinstance(data, dict):
         return False
     if "error" in data:
         return False
-    if not data:
-        return False
-    for key, value in data.items():
-        if key == "skills":
-            if isinstance(value, list) and any(str(x).strip() for x in value):
-                return True
-            continue
-        if value not in (None, "", []):
-            return True
-    return False
+    return bool(data)
 
 
 def normalized_data_to_embedding_text(data) -> str:
