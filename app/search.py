@@ -420,7 +420,7 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
     results = []
     for row, score in zip(rows, rerank_scores):
         print("score:", score)
-        if float(score) >= 0.01:
+        if float(score) >= 0.065:
             results.append({
                 "user_id": row["user_id"],
                 "description": row["description"],
