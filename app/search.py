@@ -320,7 +320,7 @@ def search_vacancies_without_rerank(
     return results
 
 
-def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str, Any]]:
+def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> Dict[str, Any]:
     """
     По вакансии находит подходящих пользователей (кандидатов).
     Вакансия — запрос, профили пользователей — документы.
@@ -343,7 +343,10 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
     if USE_LLM_NORMALIZE and not has_usable_normalized_vacancy_data(normalized_data):
         metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
         print("search_users_by_vacancy: skip (no normalized data), metrics:", metrics)
-        return []
+        return {
+            "query_text": query_text,
+            "results": [],
+        }
 
     # ---------- 1. EMBEDDING ВАКАНСИИ ----------
     t0 = time.perf_counter()
@@ -402,7 +405,10 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
     if not rows:
         metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
         print("search_users_by_vacancy metrics:", metrics)
-        return []
+        return {
+            "query_text": query_text,
+            "results": [],
+        }
 
     # ---------- 4. PRE-RERANK PRUNING ----------
     rows = rows[:RERANK_K]
@@ -440,4 +446,7 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> List[Dict[str
     )
     print("search_users_by_vacancy metrics:", metrics)
 
-    return results
+    return {
+        "query_text": query_text,
+        "results": results,
+    }
