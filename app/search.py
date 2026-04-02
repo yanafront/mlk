@@ -344,7 +344,7 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> Dict[str, Any
         metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
         print("search_users_by_vacancy: skip (no normalized data), metrics:", metrics)
         return {
-            "query_text": query_text,
+            "query_text": normalized_data,
             "results": [],
         }
 
@@ -406,7 +406,7 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> Dict[str, Any
         metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
         print("search_users_by_vacancy metrics:", metrics)
         return {
-            "query_text": query_text,
+            "query_text": normalized_data,
             "results": [],
         }
 
@@ -447,6 +447,6 @@ def search_users_by_vacancy(vacancy_text: str, top_k: int = 20) -> Dict[str, Any
     print("search_users_by_vacancy metrics:", metrics)
 
     return {
-        "query_text": query_text,
+        "query_text": normalized_data,
         "results": results,
     }
