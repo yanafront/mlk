@@ -13,15 +13,27 @@ from app.vacancy_normalizer import (
     has_usable_normalized_vacancy_data,
 )
 from app.confidence import compute_confidence, get_generic_vacancy_embedding
+from app.text_normalizer import normalize_vacancy
+from app.vacancy_normalizer import normalized_data_to_embedding_text
 
-
-# Ограничение применяется после финального расчёта (rerank + confidence)
 TOP_K = int(os.getenv("TOP_K", 50))
 VECTOR_K = int(os.getenv("VECTOR_K", 200))
 RERANK_K = int(os.getenv("RERANK_K", 20))
 FINAL_K = int(os.getenv("FINAL_K", 5))  
 USE_LLM_NORMALIZE = os.getenv("USE_LLM_NORMALIZE", "true").lower() == "true"
 
+def extract_filters(query: str):
+    """Извлекает профессию и город из запроса"""
+    q = query.lower()
+    
+    professions = ["официант", "курьер", "продавец", "программист", 
+                   "бариста", "повар", "администратор", "водитель"]
+    cities = ["минск", "гомель", "могилёв", "витебск", "гродно", "брест"]
+    
+    found_prof = next((p for p in professions if p in q), None)
+    found_city = next((c for c in cities if c in q), None)
+    
+    return found_prof, found_city
 
 def parse_pgvector(raw_embedding) -> List[float]:
     """
@@ -49,168 +61,95 @@ def is_valid_vacancy(text: str) -> bool:
     return len(text.strip()) >= 50
 
 
-def search_vacancies(
-    user_query: str,
-) -> List[Dict[str, Any]]:
-   
-   
+def search_vacancies(user_query: str) -> List[Dict[str, Any]]:
+    import os
+    import time
+    import psycopg2.extras
+    
+    VECTOR_K = int(os.getenv("VECTOR_K", 300))
+    RERANK_K = int(os.getenv("RERANK_K", 15))
+    FINAL_K = int(os.getenv("FINAL_K", 10))
+    
     t_start = time.perf_counter()
-    metrics = {}
-
-    # ---------- 1. EMBEDDING ЗАПРОСА ----------
-    t0 = time.perf_counter()
-    query_text = (
-        "Задача: найти подходящую вакансию по запросу кандидата.\n"
-        f"Запрос пользователя: {user_query}"
-    )
-
-    # E5 требует префикс "query: " для запросов (иначе качество сильно падает)
+    
+    # ---------- 1. QUERY ----------
     query_embedding = embedding_model.encode(
         f"query: {user_query}",
         normalize_embeddings=True
     ).tolist()
-    metrics["embedding_ms"] = (time.perf_counter() - t0) * 1000
-
-    # ---------- 2. VECTOR SEARCH В POSTGRES ----------
-    t0 = time.perf_counter()
+    
+    # ---------- 2. VECTOR SEARCH ----------
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    where_conditions = ["embedding IS NOT NULL"]
-    query_params = [query_embedding]
-
-    where_clause = " AND ".join(where_conditions)
-    query_params.append(VECTOR_K)
-
-    cur.execute(f"""
-    SELECT
-        id,
-        content,
-        normalized,
-        embedding,
-        embedding <=> %s::vector AS distance
-    FROM messages
-    WHERE {where_clause}
-    ORDER BY distance
-    LIMIT %s;
-    """, tuple(query_params))
-
+    
+    cur.execute("""
+        SELECT id, content, normalized, embedding,
+               embedding <=> %s::vector AS distance
+        FROM messages
+        WHERE embedding IS NOT NULL
+        ORDER BY distance
+        LIMIT %s;
+    """, (query_embedding, VECTOR_K))
+    
     rows = cur.fetchall()
     cur.close()
     conn.close()
-    metrics["vector_search_ms"] = (time.perf_counter() - t0) * 1000
-
+    
     if not rows:
-        metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
-        print("search_vacancies metrics:", metrics)
         return []
-
-    # ---------- 3. ФИЛЬТР МУСОРА ----------
-    t0 = time.perf_counter()
-    rows = [
-        r for r in rows
-        if is_valid_vacancy(r["content"])
-    ]
-    # Pre-rerank pruning: ограничиваем количество кандидатов для CrossEncoder
+    
+    # ---------- 3. МЯГКИЕ ФИЛЬТРЫ ----------
+    profession, city = extract_filters(user_query)
+    
+    for r in rows:
+        text_lower = r["content"].lower()
+        
+        r["profession_bonus"] = 1.2 if (profession and profession in text_lower) else 1.0
+        
+        if city and city in text_lower:
+            r["city_bonus"] = 1.2
+        elif city:
+            r["city_bonus"] = 0.9
+        else:
+            r["city_bonus"] = 1.0
+    
     rows = rows[:RERANK_K]
-    metrics["filter_ms"] = (time.perf_counter() - t0) * 1000
-
-    if not rows:
-        metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
-        print("search_vacancies metrics:", metrics)
-        return []
-
-    # ---------- 4. RERANK ----------
-    t0 = time.perf_counter()
-    documents = [
-        normalized_data_to_embedding_text(r["normalized"])
-        for r in rows
-    ]
-
-    pairs = [
-        (user_query, doc)
-        for doc in documents
-    ]
-
+    
+    # ---------- 4. ДОКУМЕНТЫ ----------
+    documents = []
+    for r in rows:
+        base_text = normalize_vacancy(r["content"])
+        norm_text = normalized_data_to_embedding_text(r["normalized"])
+        
+        doc = norm_text if norm_text and len(norm_text) >= 30 else base_text
+        documents.append(doc[:512])
+    
+    # ---------- 5. RERANK ----------
+    pairs = [(f"query: {user_query}", f"passage: {doc}") for doc in documents]
     rerank_scores = reranker_model.predict(pairs, batch_size=16)
-    metrics["rerank_ms"] = (time.perf_counter() - t0) * 1000
-
-    # ---------- 5. FINAL SCORE = semantic × confidence ----------
-    t0 = time.perf_counter()
+    
+    # ---------- 6. SCORE ----------
     results = []
-    
-    # Порог фильтрации. По умолчанию 0 = возвращаем топ по score без отсечения
-    SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0"))
-    
-    # Отладочная информация для диагностики
-    debug_scores = []
-
-    generic_embedding = get_generic_vacancy_embedding()
-
-    for row, semantic_score in zip(rows, rerank_scores):
-        vacancy_embedding = parse_pgvector(row["embedding"])
-        confidence = compute_confidence(
-            text=row["content"],
-            vacancy_embedding=vacancy_embedding,
-            generic_embedding=generic_embedding
-        )
-        final_score = float(semantic_score) * (0.7 + 0.3 * confidence)
-
-        # Сохраняем для отладки
-        debug_scores.append({
-            "id": row["id"],
-            "semantic_score": float(semantic_score),
-            "confidence": confidence,
-            "final_score": final_score
+    for r, score in zip(rows, rerank_scores):
+        final_score = float(score)
+        final_score *= r["profession_bonus"]
+        final_score *= r["city_bonus"]
+        
+        if user_query.lower() in r["content"].lower():
+            final_score *= 1.2
+        
+        results.append({
+            "id": r["id"],
+            "content": r["content"],
+            "score": final_score
         })
-
-        if final_score >= SCORE_THRESHOLD:
-            results.append({
-                "id": row["id"],
-                "content": row["content"],
-                "score": final_score
-            })
     
-    RETURN_TOP_WHEN_BELOW = os.getenv("RETURN_TOP_WHEN_ALL_BELOW_THRESHOLD", "false").lower() == "true"
-    if not results and debug_scores and RETURN_TOP_WHEN_BELOW:
-        print(f"Все кандидаты ниже порога {SCORE_THRESHOLD}; возвращаем топ-{FINAL_K} по score (реальные документы из БД)")
-        top_by_score = sorted(debug_scores, key=lambda x: x["final_score"], reverse=True)[:FINAL_K]
-        for s in top_by_score:
-            row = next(r for r in rows if r["id"] == s["id"])
-            results.append({
-                "id": row["id"],
-                "content": row["content"],
-                "score": s["final_score"]
-            })
-
-    # Диагностика: полная таблица scores (запуск с DIAGNOSE=1)
-    if os.getenv("DIAGNOSE") == "1" and debug_scores:
-        sorted_debug = sorted(debug_scores, key=lambda x: x["final_score"], reverse=True)
-        print("DIAGNOSE scores (semantic × confidence = final):")
-        for i, s in enumerate(sorted_debug[:20], 1):
-            print(f"  {i}. id={s['id']} semantic={s['semantic_score']:.4f} conf={s['confidence']:.4f} final={s['final_score']:.4f}")
-        if len(debug_scores) > 20:
-            print(f"  ... и ещё {len(debug_scores) - 20} кандидатов")
-    
-    metrics["confidence_ms"] = (time.perf_counter() - t0) * 1000
-
-    # ---------- 6. SORT И ФИНАЛЬНЫЙ ФИЛЬТР ----------
-    t0 = time.perf_counter()
+    # ---------- 7. СОРТИРОВКА ----------
     results.sort(key=lambda x: x["score"], reverse=True)
-    # FINAL_K — конечное количество результатов после rerank + confidence
     results = results[:FINAL_K]
-    metrics["sort_ms"] = (time.perf_counter() - t0) * 1000
-
-    metrics["total_ms"] = (time.perf_counter() - t_start) * 1000
-    metrics["candidates_count"] = len(rows)
-    metrics["results_count"] = len(results)
-    print(
-        "search_vacancies sizes:",
-        "vector_candidates=", len(rows),
-        "final_results=", len(results),
-    )
-    print("search_vacancies metrics:", metrics)
-
+    
+    print(f"Search completed in {round((time.perf_counter() - t_start)*1000, 2)} ms")
+    
     return results
     
 
@@ -282,7 +221,7 @@ def search_vacancies_without_rerank(
         print("search_vacancies_without_rerank metrics:", metrics)
         return []
 
-    # ---------- 4. FINAL SCORE = (1 - distance) × confidence ----------
+    # ---------- 4. FINAL SCORE ----------
     t0 = time.perf_counter()
     results = []
     generic_embedding = get_generic_vacancy_embedding()
